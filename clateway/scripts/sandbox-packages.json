@@ -1,5 +1,5 @@
 {
-  "$comment": "What the agent sandbox images (Dockerfile) install: everything here goes into all three images (standard, full, engineering), \"office\" only into the full one and \"engineering\" only into the engineering one. Source for SANDBOX_IMAGE_TOOLS / SANDBOX_NODE_PACKAGES / SANDBOX_PYTHON_PACKAGES in supabase/functions/_shared/ai-workforce/sandbox.ts (tests/unit/ai-workforce/sandboxImage.test.ts keeps them in step) and for the Clateway Claude Code plugin's scanner. Node packages are global (NODE_PATH) and linked into /workspace/node_modules at sandbox start, so they work without network.",
+  "$comment": "What the agent sandbox images (Dockerfile) install: everything here goes into all five images (standard, full, engineering, mobile, operations), \"office\" only into the full one, \"engineering\" only into the engineering one, \"mobile\" only into the mobile one and \"operations\" only into the operations one. Source for SANDBOX_IMAGE_TOOLS / SANDBOX_NODE_PACKAGES / SANDBOX_PYTHON_PACKAGES in supabase/functions/_shared/ai-workforce/sandbox.ts (tests/unit/ai-workforce/sandboxImage.test.ts keeps them in step) and for the Clateway Claude Code plugin's scanner. Node packages are global (NODE_PATH) and linked into /workspace/node_modules at sandbox start, so they work without network.",
   "apt": [
     "git", "curl", "ca-certificates", "jq", "unzip", "zip",
     "ffmpeg", "sox", "libsox-fmt-mp3", "imagemagick", "librsvg2-bin", "graphviz", "libimage-exiftool-perl",
@@ -193,6 +193,96 @@
     "tools": ["ccx", "iec2c", "openplc", "openplc-ui", "opcua-bridge", "gltf-transform", "cyclonedx-py"],
     "leave_out": {
       "$comment": "What the engineering image leaves out of the standard set, to stay under AgentCore's 2,048 MB image limit: VS Code in the browser (code-server; OpenPLC brings its own editor), the Semgrep scanner and its rules, the Trivy database (the trivy command stays and needs a network for it), and the VS Code extension tooling.",
+      "tools": ["code-server", "semgrep", "vsce", "yo"],
+      "npm": ["@types/vscode", "@vscode/vsce", "yo", "generator-code", "@vscode/test-cli", "@vscode/test-electron"]
+    }
+  },
+  "mobile": {
+    "$comment": "Mobile image only (IMAGE_VARIANT=mobile, runtime clateway_workspace_mobile): what a mobile app team needs to build, test and package Android apps and to prepare iOS work on Linux ARM64. JDK 17, the Android SDK (command-line tools, two platforms, two build-tools versions) and Gradle, plus fastlane (Ruby) for store metadata and lanes. Google ships the SDK's native programs (aapt2, aapt, aidl, zipalign) for x86-64 Linux only, so on ARM64 they run through qemu-user with Ubuntu's x86-64 C library (mobile/android-x86-run); everything else in an Android build is Java. No emulator (a sandbox has no hardware virtualisation), no NDK and no Xcode: instrumented tests, native code and every iOS build run in the repository's pipeline (macOS runners for Xcode). VS Code in the browser and the claude command stay in this image. mobile/check-mobile builds and signs a small APK during the image build, so a broken tool fails the build.",
+    "apt": ["openjdk-17-jdk-headless", "qemu-user-static", "libc6-amd64-cross", "libgcc-s1-amd64-cross", "libstdc++6-amd64-cross", "ruby-full", "build-essential"],
+    "android": {
+      "$comment": "The command-line tools archive is checked against cmdline_tools_sha256; sdkmanager then installs the platforms and build-tools with the checksums of Google's repository index (the last build-tools version is build-tools/current, the one on PATH). sdk_root belongs to the sandbox user, so the Android Gradle Plugin can add a platform or build-tools version a project asks for when the sandbox's network reaches dl.google.com; a sandbox is one task's own machine.",
+      "sdk_root": "/opt/android-sdk",
+      "cmdline_tools_build": "13114758",
+      "cmdline_tools_sha256": "7ec965280a073311c339e571cd5de778b9975026cfcbe79f2b1cdcb1e15317ee",
+      "platforms": ["android-35", "android-36"],
+      "build_tools": ["35.0.0", "36.0.0"],
+      "x86_programs": ["aapt2", "aapt", "aidl", "zipalign"]
+    },
+    "gradle": { "version": "8.14.3", "sha256": "bd71102213493060956ec229d946beee57158dbd89d0e62b91bca0fa2c5f3531" },
+    "gems": { "fastlane": "2.228.0" },
+    "hosts": [
+      "dl.google.com", "maven.google.com", "repo.maven.apache.org", "repo1.maven.org",
+      "plugins.gradle.org", "plugins-artifacts.gradle.org", "services.gradle.org", "downloads.gradle.org",
+      "jitpack.io", "rubygems.org", "index.rubygems.org", "cdn.cocoapods.org"
+    ],
+    "tools": ["java", "javac", "keytool", "gradle", "sdkmanager", "apkanalyzer", "aapt2", "aapt", "aidl", "zipalign", "apksigner", "d8", "ruby", "gem", "bundle", "fastlane", "mobile-setup", "mobile-preview", "mobile-walk"],
+    "leave_out": {
+      "$comment": "What the mobile image leaves out of the standard set, to stay under AgentCore's 2,048 MB image limit: the Semgrep scanner and its rules, and the Trivy database (the trivy command stays and needs a network for it).",
+      "tools": ["semgrep"],
+      "npm": []
+    }
+  },
+  "operations": {
+    "$comment": "Operations image only (IMAGE_VARIANT=operations, runtime clateway_workspace_ops): what the cloud infrastructure team needs to read and plan changes on AWS, Azure and Google Cloud from a sandbox. The AWS CLI v2, the Azure CLI (its own venv in /opt/az, so its pins never touch the image's Python packages), the Google Cloud CLI (core, bq, gsutil; no extra components, on the system Python), Terraform and OpenTofu, kubectl and Helm, uv / uvx and mcp-proxy-for-aws (the AWS MCP proxy the AWS Agent Toolkit's plugins use, in its own venv), and the AWS Agent Toolkit (skills, rules and MCP configs) at a pinned commit in /opt/aws-agent-toolkit. Every download is pinned and checked against its SHA-256 (the publishers' checksum files for Terraform, OpenTofu, kubectl, Helm and uv; for the AWS CLI zip and the Google Cloud CLI tarball, which publish no checksum file, the SHA-256 of the official download taken when the pin was set). Credentials are never in the image: an agent gets them only as its own secrets, passed to one command. operations/check-operations runs every tool during the image build, so a broken pin or tool fails the build. scripts/aws-agent-toolkit/update.mjs moves the toolkit and mcp-proxy-for-aws pins (weekly workflow aws-agent-toolkit-update.yml).",
+    "aws_cli": {
+      "version": "2.41.2",
+      "sha256_arm64": "710601ab1a7d15622416e3a6c238dc04a58cce6d920cae3307dbe4667d4f96bb",
+      "sha256_amd64": "2db6f80635cf554a506f3b3c1d070937b87526193fb37e0ac80c8705398219da"
+    },
+    "azure_cli": { "version": "2.93.0", "venv": "/opt/az" },
+    "gcloud": {
+      "$comment": "The versioned archive from dl.google.com (google-cloud-cli-<version>-linux-arm / -x86_64). The bundled Python is removed; gcloud runs on the system Python 3.12 (CLOUDSDK_PYTHON).",
+      "version": "594.0.0",
+      "sha256_arm64": "e58fb86fff3dfd7101e1ff138f06bd4e338c7bf12a7508a7871985e7ea886275",
+      "sha256_amd64": "1f7233537c26bba94a3ea3f9085a60396745eaf44b21b8454fc6fdd15bb6fcde"
+    },
+    "terraform": {
+      "version": "1.17.2",
+      "sha256_arm64": "858e08c181a76b6b223e8c767a8e983922eebe2d062db949a2de66ce040c368c",
+      "sha256_amd64": "e6f16b2f0b137ee5729caa8c4e79a3bae4ee261acd198a1fcfa8584a6296605b"
+    },
+    "opentofu": {
+      "version": "1.13.9",
+      "sha256_arm64": "04f7c93828b859d420269ed30f923ffebf09157b5d7fb95bf8d88a4d208b7fa3",
+      "sha256_amd64": "bc44eb6b06446ba83bd4072114891987f590f66cca712737a7f1147c50c539ce"
+    },
+    "kubectl": {
+      "version": "1.37.2",
+      "sha256_arm64": "fcc16f63186659d9722014b7e02d5fdd2d4e669cb8c0ab66365d7d3b8ba03509",
+      "sha256_amd64": "c04487523e7aa7d1493f7808174c899db93d7a9cf57531420cd76b9bd415f8f4"
+    },
+    "helm": {
+      "version": "4.3.2",
+      "sha256_arm64": "df31cb61680ef728f82c770e5280dd565617bee6b039d37e85c677288be4bbb0",
+      "sha256_amd64": "d1c0278d46beab79582d7e50f5b3dc206944ba8e577cde618513fd07daa53983"
+    },
+    "uv": {
+      "version": "0.13.9",
+      "sha256_arm64": "0797542018e541a9288855df555c8077eed06f7a47d206362030480e8ecc9f3d",
+      "sha256_amd64": "a7fbaff2b9a271d85c1bdb540941090fd1ce011797b4abeb48e4dcd39c2471d5"
+    },
+    "pip": {
+      "$comment": "Installed into its own venv (/opt/mcp-proxy-for-aws), not the image's Python. The version is the release of the mcp-proxy-for-aws commit the toolkit's plugins/aws-core/.mcp.json pins (update.mjs keeps them in step).",
+      "mcp-proxy-for-aws": "1.8.0"
+    },
+    "aws_agent_toolkit": {
+      "$comment": "github.com/aws/agent-toolkit-for-aws (Apache-2.0) at a pinned commit in /opt/aws-agent-toolkit, root-owned and readable by the sandbox user: only skills/ (SKILL.md files with their references), rules/, plugins/*/.mcp.json, LICENSE, NOTICE and README.md are kept. The skills list for prompts is generated into supabase/functions/_shared/ai-workforce/aws-agent-toolkit.ts by scripts/aws-agent-toolkit/update.mjs.",
+      "repository": "https://github.com/aws/agent-toolkit-for-aws",
+      "commit": "8f0a25daf716ba631948f59edca9fdcc47532226",
+      "committed_at": "2026-11-20T08:48:05Z",
+      "path": "/opt/aws-agent-toolkit"
+    },
+    "hosts": {
+      "$comment": "Cloud API hosts an operations agent's sandbox settings list under \"Sites you list\" (CLOUD_API_HOSTS in sandbox.ts). \"*.example.com\" means every subdomain (the egress proxy's rule). Model endpoints (Bedrock, Vertex AI) stay refused by the proxy whatever is listed.",
+      "aws": ["*.amazonaws.com", "*.api.aws"],
+      "azure": ["management.azure.com", "login.microsoftonline.com", "graph.microsoft.com"],
+      "gcp": ["*.googleapis.com"],
+      "iac": ["registry.terraform.io", "releases.hashicorp.com", "registry.opentofu.org", "github.com", "objects.githubusercontent.com", "release-assets.githubusercontent.com"]
+    },
+    "tools": ["aws", "az", "gcloud", "gsutil", "bq", "terraform", "tofu", "kubectl", "helm", "uv", "uvx", "mcp-proxy-for-aws"],
+    "leave_out": {
+      "$comment": "What the operations image leaves out of the standard set, to stay under AgentCore's 2,048 MB image limit (the three cloud CLIs add about 0.9 GB on disk): VS Code in the browser (code-server), the Semgrep scanner and its rules, the Trivy database (the trivy command stays and needs a network for it), and the VS Code extension tooling.",
       "tools": ["code-server", "semgrep", "vsce", "yo"],
       "npm": ["@types/vscode", "@vscode/vsce", "yo", "generator-code", "@vscode/test-cli", "@vscode/test-electron"]
     }
