@@ -199,14 +199,15 @@
   },
   "mobile": {
     "$comment": "Mobile image only (IMAGE_VARIANT=mobile, runtime clateway_workspace_mobile): what a mobile app team needs to build, test and package Android apps and to prepare iOS work on Linux ARM64. JDK 17, the Android SDK (command-line tools, two platforms, two build-tools versions) and Gradle, plus fastlane (Ruby) for store metadata and lanes. Google ships the SDK's native programs (aapt2, aapt, aidl, zipalign) for x86-64 Linux only, so on ARM64 they run through qemu-user with Ubuntu's x86-64 C library (mobile/android-x86-run); everything else in an Android build is Java. No emulator (a sandbox has no hardware virtualisation), no NDK and no Xcode: instrumented tests, native code and every iOS build run in the repository's pipeline (macOS runners for Xcode). VS Code in the browser and the claude command stay in this image. mobile/check-mobile builds and signs a small APK during the image build, so a broken tool fails the build.",
-    "apt": ["openjdk-17-jdk-headless", "qemu-user-static", "libc6-amd64-cross", "libgcc-s1-amd64-cross", "libstdc++6-amd64-cross", "ruby-full", "build-essential"],
+    "apt": ["openjdk-17-jdk-headless", "qemu-user-static", "libc6-amd64-cross", "libgcc-s1-amd64-cross", "libstdc++6-amd64-cross", "ruby-full",
+      "ruby-bundler", "build-essential"],
     "android": {
       "$comment": "The command-line tools archive is checked against cmdline_tools_sha256; sdkmanager then installs the platforms and build-tools with the checksums of Google's repository index (the last build-tools version is build-tools/current, the one on PATH). sdk_root belongs to the sandbox user, so the Android Gradle Plugin can add a platform or build-tools version a project asks for when the sandbox's network reaches dl.google.com; a sandbox is one task's own machine.",
       "sdk_root": "/opt/android-sdk",
       "cmdline_tools_build": "13114758",
       "cmdline_tools_sha256": "7ec965280a073311c339e571cd5de778b9975026cfcbe79f2b1cdcb1e15317ee",
-      "platforms": ["android-35", "android-36"],
-      "build_tools": ["35.0.0", "36.0.0"],
+      "platforms": ["android-36"],
+      "build_tools": ["36.0.0"],
       "x86_programs": ["aapt2", "aapt", "aidl", "zipalign"]
     },
     "gradle": { "version": "8.14.3", "sha256": "bd71102213493060956ec229d946beee57158dbd89d0e62b91bca0fa2c5f3531" },
@@ -218,9 +219,9 @@
     ],
     "tools": ["java", "javac", "keytool", "gradle", "sdkmanager", "apkanalyzer", "aapt2", "aapt", "aidl", "zipalign", "apksigner", "d8", "ruby", "gem", "bundle", "fastlane", "mobile-setup", "mobile-preview", "mobile-walk"],
     "leave_out": {
-      "$comment": "What the mobile image leaves out of the standard set, to stay under AgentCore's 2,048 MB image limit: the Semgrep scanner and its rules, and the Trivy database (the trivy command stays and needs a network for it).",
-      "tools": ["semgrep"],
-      "npm": []
+      "$comment": "What the mobile image leaves out of the standard set, to stay under AgentCore's 2,048 MB image limit (it measured 2,440 MB compressed with them): VS Code in the browser (code-server), the Semgrep scanner and its rules, the Trivy database (the trivy command stays and needs a network for it), and the VS Code extension tooling. One Android platform and build-tools version only: Gradle adds another one a project asks for when the sandbox reaches dl.google.com.",
+      "tools": ["code-server", "semgrep", "vsce", "yo"],
+      "npm": ["@types/vscode", "@vscode/vsce", "yo", "generator-code", "@vscode/test-cli", "@vscode/test-electron"]
     }
   },
   "operations": {
